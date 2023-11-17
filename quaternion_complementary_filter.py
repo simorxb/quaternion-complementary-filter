@@ -7,6 +7,14 @@ def normalize(v):
     """Normalize a vector."""
     return v / np.linalg.norm(v)
 
+def quaternion_conjugate(q):
+    """Conjugate of a quaternion."""
+    q0 = q[0].item()
+    q1 = q[1].item()
+    q2 = q[2].item()
+    q3 = q[3].item()
+    return np.array([[q0], [-q1], [-q2], [-q3]])
+
 def quaternion_multiply(p, q):
     """Multiply two quaternions."""
     p0 = p[0].item()
@@ -83,7 +91,7 @@ def complementary_filter_step(q_prev, omega, accel, mag, dt, alpha, beta):
     q_pred /= np.linalg.norm(q_pred)
 
     # Predicted gravity
-    rot = rotation_matrix_from_quaternion(q_pred)
+    rot = rotation_matrix_from_quaternion(quaternion_conjugate(q_pred))
     g = rot @ accel
     gx = g[0, 0].item()
     gy = g[1, 0].item()
@@ -99,13 +107,13 @@ def complementary_filter_step(q_prev, omega, accel, mag, dt, alpha, beta):
     # Interpolate with identity quaternion
     if delta_q_acc[0] > 0.9:
         # Linear Interpolation
-        delta_q_acc_bar = (1 - alpha) * np.array([[1], [0], [0], [0]]) + alpha * delta_q_acc
+        delta_q_acc_bar = (1.0 - alpha) * np.array([[1], [0], [0], [0]]) + alpha * delta_q_acc
         delta_q_acc_hat = normalize(delta_q_acc_bar)
     else:
         # Spherical Linear Interpolation
         omega = np.arccos(delta_q_acc[0])
         delta_q_acc_hat = (
-            np.array([[1], [0], [0], [0]]) * np.sin((1 - alpha) * omega) / np.sin(omega) +
+            np.array([[1], [0], [0], [0]]) * np.sin((1.0 - alpha) * omega) / np.sin(omega) +
             delta_q_acc * np.sin(alpha * omega) / np.sin(omega)
         )
 
@@ -113,11 +121,7 @@ def complementary_filter_step(q_prev, omega, accel, mag, dt, alpha, beta):
     q_pred_acc = quaternion_multiply(q_pred, delta_q_acc_hat)
 
     # Conjiugate quaternion
-    q0 = q_pred_acc[0].item()
-    q1 = q_pred_acc[1].item()
-    q2 = q_pred_acc[2].item()
-    q3 = q_pred_acc[3].item()
-    q_pred_acc_conj = np.array([[q0], [-q1], [-q2], [-q3]])
+    q_pred_acc_conj = quaternion_conjugate(q_pred_acc)
 
     # Rotate magnetometer measurement
     lx = (rotation_matrix_from_quaternion(q_pred_acc_conj) @ mag)[0].item()
@@ -135,29 +139,30 @@ def complementary_filter_step(q_prev, omega, accel, mag, dt, alpha, beta):
     # Interpolate with identity quaternion
     if delta_q_mag[0] > 0.9:
         # Linear Interpolation
-        delta_q_mag_bar = (1 - beta) * np.array([[1], [0], [0], [0]]) + beta * delta_q_mag
+        delta_q_mag_bar = (1.0 - beta) * np.array([[1], [0], [0], [0]]) + beta * delta_q_mag
         delta_q_mag_hat = normalize(delta_q_mag_bar)
     else:
         # Spherical Linear Interpolation
         omega = np.arccos(delta_q_mag[0])
         delta_q_mag_hat = (
-            np.array([[1], [0], [0], [0]]) * np.sin((1 - beta) * omega) / np.sin(omega) +
+            np.array([[1], [0], [0], [0]]) * np.sin((1.0 - beta) * omega) / np.sin(omega) +
             delta_q_mag * np.sin(beta * omega) / np.sin(omega)
         )
 
     # Applying complementary filter
     q_next = quaternion_multiply(q_pred_acc, delta_q_mag_hat)
+
     return normalize(q_next)
 
 # Configure filter
 dt = 0.1  # Time step
-alpha = 0.3  # Acc filter coefficient
-beta = 0.3  # Mag filter coefficient
+alpha = 0.5  # Acc filter coefficient
+beta = 0.5  # Mag filter coefficient
 
 # Load the data
-gyro_data = pd.read_csv('.\Quaternion Complementary Filter\GyroscopeUncalibrated.csv')
-mag_data = pd.read_csv('.\Quaternion Complementary Filter\MagnetometerUncalibrated.csv')
-accel_data = pd.read_csv('.\Quaternion Complementary Filter\AccelerometerUncalibrated.csv')
+gyro_data = pd.read_csv('GyroscopeUncalibrated.csv')
+mag_data = pd.read_csv('MagnetometerUncalibrated.csv')
+accel_data = pd.read_csv('AccelerometerUncalibrated.csv')
 
 # Resample the data to a uniform time axis
 time_axis = np.arange(0, max(gyro_data['seconds_elapsed'].max(), mag_data['seconds_elapsed'].max(), accel_data['seconds_elapsed'].max()), dt)
@@ -183,8 +188,11 @@ for i in range(len(time_axis)):
     quaternion_log.append(q_next)
     q_prev = q_next
 
+    # Conjugate
+    q_next_conj = quaternion_conjugate(q_next)
+
     # Calculate pitch, roll, and yaw from the quaternion
-    pitch, roll, yaw = quaternion_to_euler(q_next)
+    pitch, roll, yaw = quaternion_to_euler(q_next_conj)
     pitch_log.append(pitch)
     roll_log.append(roll)
     yaw_log.append(yaw)
